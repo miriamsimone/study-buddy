@@ -20,10 +20,17 @@ export type Tutor = {
   connectionPoints?: string[];
 }
 
+export type Goal = {
+  id: string;
+  name: string;
+  progress: number; // 0-100
+  status: 'active' | 'completed';
+}
+
 export type Student = {
   id: string;
   name: string;
-  currentGoals: string[];
+  currentGoals: Goal[];
   interests: string[];
   sessionHistory: Session[];
   emotionalPatterns?: string[];
@@ -76,7 +83,10 @@ export const mockTutors: Tutor[] = [
 export const mockStudent: Student = {
   id: "student_789",
   name: "Alex",
-  currentGoals: ["SAT Math", "Calc AB"],
+  currentGoals: [
+    { id: "goal_sat", name: "SAT Math", progress: 85, status: 'active' },
+    { id: "goal_calc", name: "Calc AB", progress: 45, status: 'active' }
+  ],
   interests: ["Basketball", "Music production"],
   sessionHistory: [mockSession],
   emotionalPatterns: ["Test anxiety", "Perfectionism"]

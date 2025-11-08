@@ -1,21 +1,29 @@
-import express from 'express';
-import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-const app = express();
-const port = 3001;
-
-app.use(cors());
-app.use(express.json());
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-app.post('/api/chat', async (req, res) => {
+export default async function handler(req, res) {
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
   try {
     const { messages, system, studentContext } = req.body;
 
@@ -73,9 +81,5 @@ app.post('/api/chat', async (req, res) => {
     console.error('Error:', error);
     res.status(500).json({ error: 'Failed to get response from Claude' });
   }
-});
-
-app.listen(port, () => {
-  console.log(`Backend server running on http://localhost:${port}`);
-});
+}
 

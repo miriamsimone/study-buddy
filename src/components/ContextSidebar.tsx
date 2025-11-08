@@ -22,13 +22,27 @@ export default function ContextSidebar({ session, student }: ContextSidebarProps
           <h3 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
             Current Goals
           </h3>
-          <div className="space-y-2">
-            {student.currentGoals.map((goal, index) => (
+          <div className="space-y-3">
+            {student.currentGoals.map((goal) => (
               <div
-                key={index}
-                className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2"
+                key={goal.id}
+                className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-3"
               >
-                <span className="text-sm text-blue-900">{goal}</span>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-medium text-blue-900">{goal.name}</span>
+                  <span className="text-xs text-blue-700 font-semibold">{goal.progress}%</span>
+                </div>
+                <div className="w-full bg-blue-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-1000 ease-out"
+                    style={{ width: `${goal.progress}%` }}
+                  ></div>
+                </div>
+                {goal.status === 'completed' && (
+                  <div className="mt-2 text-xs text-green-600 font-semibold flex items-center">
+                    <span className="mr-1">✓</span> Completed!
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import TutorCard from './TutorCard';
-import type { Tutor, Session, Student } from '../lib/mockData';
+import type { Tutor, Session, Student, Goal } from '../lib/mockData';
 
 interface ChatInterfaceProps {
   showTutors: boolean;
@@ -8,6 +8,8 @@ interface ChatInterfaceProps {
   tutors: Tutor[];
   session: Session;
   student: Student;
+  updateGoalProgress: (goalId: string, progress: number, status?: 'active' | 'completed') => void;
+  addGoal: (newGoal: Goal) => void;
 }
 
 interface Message {
@@ -16,45 +18,14 @@ interface Message {
   content: string;
 }
 
-export default function ChatInterface({ showTutors, setShowTutors, tutors, session, student }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasLoadedWelcome, setHasLoadedWelcome] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+// Helper to get API URL based on environment
+const getApiUrl = () => {
+  // In production (Vercel), use relative path
+  // In development, use localhost
+  return import.meta.env.PROD ? '/api/chat' : 'http://localhost:3001/api/chat';
+};
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Load welcome message on mount
-  useEffect(() => {
-    if (!hasLoadedWelcome && messages.length === 0) {
-      setHasLoadedWelcome(true);
-      loadWelcomeMessage();
-    }
-  }, [hasLoadedWelcome, messages.length]);
-
-  const loadWelcomeMessage = async () => {
-    setIsLoading(true);
-    
-    const welcomePrompt = {
-      role: 'user' as const,
-      content: 'Hi! (This is the student opening the app. Greet them warmly and naturally reference their last session, what they worked on, and what they struggled with. Keep it friendly and conversational - 2-3 sentences max.)',
-    };
-
-    try {
-      const response = await fetch('http://localhost:3001/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          system: `You are a study companion for high school/college students. Your role is to:
+const SYSTEM_PROMPT = `You are a study companion for high school/college students. Your role is to:
 
 1. **Regulate first, teach second**: When students are overwhelmed, anxious, or spiraling, help them ground and focus before diving into content.
 
@@ -83,13 +54,62 @@ export default function ChatInterface({ showTutors, setShowTutors, tutors, sessi
    - Build on previous lessons
    - Celebrate progress
 
+6. **Drive retention and growth**:
+   - When student completes or nears a goal, celebrate and suggest related subjects:
+     * SAT prep complete → mention college essays, AP courses, study skills
+     * Chemistry mastered → suggest physics or other STEM subjects
+     * Math goal achieved → recommend advanced math or related areas
+   - If conversation suggests they haven't had a session recently, gently encourage booking with their tutor
+   - Highlight progress across multiple goals to show growth
+
 Remember: You're a study buddy, not a therapist. For serious mental health concerns, encourage them to talk to a counselor or trusted adult.
 
-Be conversational, warm, and supportive.`,
+Be conversational, warm, and supportive.`;
+
+export default function ChatInterface({ showTutors, setShowTutors, tutors, session, student, updateGoalProgress, addGoal }: ChatInterfaceProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedWelcome, setHasLoadedWelcome] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const processedMessageIds = useRef<Set<string>>(new Set());
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Load welcome message on mount
+  useEffect(() => {
+    if (!hasLoadedWelcome && messages.length === 0) {
+      setHasLoadedWelcome(true);
+      loadWelcomeMessage();
+    }
+  }, [hasLoadedWelcome, messages.length]);
+
+  const loadWelcomeMessage = async () => {
+    setIsLoading(true);
+    
+    const welcomePrompt = {
+      role: 'user' as const,
+      content: 'Hi! (This is the student opening the app. Greet them warmly and naturally reference their last session, what they worked on, and what they struggled with. Keep it friendly and conversational - 2-3 sentences max.)',
+    };
+
+    try {
+      const response = await fetch(getApiUrl(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          system: SYSTEM_PROMPT,
           messages: [welcomePrompt],
           studentContext: {
             studentName: student.name,
-            currentGoals: student.currentGoals,
+            currentGoals: student.currentGoals.map(g => `${g.name} (${g.progress}% complete)`),
             lastSession: session,
             emotionalPatterns: student.emotionalPatterns,
             interests: student.interests,
@@ -180,14 +200,76 @@ Be conversational, warm, and supportive.`,
 
   // Detect if AI suggests tutor escalation
   useEffect(() => {
+    // Only process if not currently loading (message is complete)
+    if (isLoading) return;
+    
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === 'assistant') {
+    if (lastMessage?.role === 'assistant' && !processedMessageIds.current.has(lastMessage.id)) {
+      // Mark this message as processed
+      processedMessageIds.current.add(lastMessage.id);
+      
       const content = lastMessage.content.toLowerCase();
+      
+      console.log('Processing message:', content);
+      
+      // Check for tutor escalation
       if (content.includes('tutor') || content.includes('connect') || content.includes('human')) {
         setShowTutors(true);
       }
+      
+      // Check for SAT completion and trigger goal update
+      // More flexible keyword matching for SAT progress
+      const hasSAT = content.includes('sat');
+      const hasPositive = content.includes('great') || content.includes('awesome') || 
+                          content.includes('excellent') || content.includes('good') ||
+                          content.includes('going well') || content.includes('confident') ||
+                          content.includes('progress') || content.includes('doing well') ||
+                          content.includes('fantastic') || content.includes('congrats') ||
+                          content.includes('well done');
+      const hasCompletion = content.includes('complete') || content.includes('finished') || 
+                           content.includes('done') || content.includes('ready');
+      
+      console.log('SAT detection:', { hasSAT, hasPositive, hasCompletion });
+      
+      if (hasSAT && (hasCompletion || hasPositive)) {
+        console.log('SAT trigger detected!');
+        // Update SAT goal to completed and add new goals
+        const satGoal = student.currentGoals.find(g => g.name.toLowerCase().includes('sat'));
+        console.log('SAT Goal found:', satGoal);
+        
+        if (satGoal && satGoal.progress < 100) {
+          console.log('Updating SAT goal to 100%');
+          setTimeout(() => {
+            updateGoalProgress(satGoal.id, 100, 'completed');
+            
+            // Add new suggested goals after a delay
+            setTimeout(() => {
+              const hasEssayGoal = student.currentGoals.some(g => g.name.toLowerCase().includes('essay'));
+              if (!hasEssayGoal) {
+                console.log('Adding college essay goal');
+                addGoal({
+                  id: 'goal_essays',
+                  name: 'College Essays',
+                  progress: 0,
+                  status: 'active'
+                });
+                
+                // Add a follow-up message about the new goal
+                setTimeout(() => {
+                  const followUpMessage: Message = {
+                    id: (Date.now() + 999).toString(),
+                    role: 'assistant',
+                    content: "Oh! I just added College Essays to your goals. Since you're crushing the SAT, that's the natural next step. Want to start brainstorming topics?"
+                  };
+                  setMessages((prev) => [...prev, followUpMessage]);
+                }, 500);
+              }
+            }, 1500);
+          }, 2000);
+        }
+      }
     }
-  }, [messages, setShowTutors]);
+  }, [messages, isLoading, setShowTutors, student.currentGoals, updateGoalProgress, addGoal]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -205,44 +287,13 @@ Be conversational, warm, and supportive.`,
 
     try {
       // Call local backend which proxies to Claude API
-      const response = await fetch('http://localhost:3001/api/chat', {
+      const response = await fetch(getApiUrl(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          system: `You are a study companion for high school/college students. Your role is to:
-
-1. **Regulate first, teach second**: When students are overwhelmed, anxious, or spiraling, help them ground and focus before diving into content.
-
-2. **Detect stress signals**:
-   - Long rambling messages covering many topics
-   - Negative self-talk ("I'm so behind", "I'll never get this")
-   - Panic about timelines
-   - Analysis paralysis
-
-3. **Respond with empathy and action**:
-   - Validate feelings
-   - Help prioritize (pick ONE thing)
-   - Reframe catastrophizing
-   - Break big problems into tiny steps
-
-4. **Know when to escalate to humans**:
-   - Complex emotional situations
-   - When student explicitly asks for human connection
-   - When you've hit your limits on a concept
-   - When you detect they need personal support
-   
-   When escalating, mention that you can connect them with a tutor who might be a good match.
-
-5. **Use context naturally**:
-   - Reference past struggles and wins if mentioned
-   - Build on previous lessons
-   - Celebrate progress
-
-Remember: You're a study buddy, not a therapist. For serious mental health concerns, encourage them to talk to a counselor or trusted adult.
-
-Be conversational, warm, and supportive.`,
+          system: SYSTEM_PROMPT,
           messages: [...messages, userMessage]
             .filter((m) => m.content && m.content.trim().length > 0)
             .map((m) => ({
@@ -251,7 +302,7 @@ Be conversational, warm, and supportive.`,
             })),
           studentContext: {
             studentName: student.name,
-            currentGoals: student.currentGoals,
+            currentGoals: student.currentGoals.map(g => `${g.name} (${g.progress}% complete)`),
             lastSession: session,
             emotionalPatterns: student.emotionalPatterns,
             interests: student.interests,
